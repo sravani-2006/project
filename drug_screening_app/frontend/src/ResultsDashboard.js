@@ -2,6 +2,16 @@ import React, { useMemo, useState } from "react";
 
 const API_BASE = "http://localhost:8000";
 
+function getBindingStrength(score) {
+  const value = Number(score);
+  if (!Number.isFinite(value)) return "";
+  if (value <= -10) return "very strong";
+  if (value <= -9) return "strong";
+  if (value <= -8) return "good";
+  if (value <= -7) return "moderate";
+  return "weak";
+}
+
 function ClusterBarChart({ data }) {
   if (!data || data.length === 0) {
     return <p className="status">No cluster distribution available yet.</p>;
@@ -42,11 +52,15 @@ function ResultsTable({ rows, columns }) {
         <tbody>
           {rows?.slice(0, 500).map((row, idx) => (
             <tr key={`${idx}-${row.ligand_id || "row"}`}>
-              {columns.map((col) => (
-                <td key={col.key} className={col.key === "smiles" ? "smiles-cell" : ""}>
-                  {String(row[col.key] ?? "")}
-                </td>
-              ))}
+              {columns.map((col) => {
+                const cellValue = col.render ? col.render(row) : String(row[col.key] ?? "");
+                const cellClass = col.className || (col.key === "smiles" ? "smiles-cell" : "");
+                return (
+                  <td key={col.key} className={cellClass}>
+                    {cellValue}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -73,6 +87,15 @@ function ResultsDashboard({ results, pipelineStatus }) {
     { key: "ligand_id", label: "Ligand ID" },
     { key: "smiles", label: "SMILES" },
     { key: "docking_score", label: "Docking Score" },
+    {
+      key: "binding_strength",
+      label: "Binding Strength",
+      className: "strength-cell",
+      render: (row) => {
+        const strength = getBindingStrength(row.docking_score);
+        return strength ? <span className={`strength-chip strength-${strength.replace(" ", "-")}`}>{strength}</span> : "";
+      },
+    },
     { key: "cluster", label: "Cluster" },
   ];
 
@@ -106,6 +129,40 @@ function ResultsDashboard({ results, pipelineStatus }) {
 
           <h3>Cluster Size Distribution</h3>
           <ClusterBarChart data={results.cluster_distribution} />
+
+          <h3>Docking Score Guide</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Score</th>
+                  <th>Binding strength</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>-6</td>
+                  <td>weak</td>
+                </tr>
+                <tr>
+                  <td>-7</td>
+                  <td>moderate</td>
+                </tr>
+                <tr>
+                  <td>-8</td>
+                  <td>good</td>
+                </tr>
+                <tr>
+                  <td>-9</td>
+                  <td>strong</td>
+                </tr>
+                <tr>
+                  <td>-10 or lower</td>
+                  <td>very strong</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <div className="download-row">
             <a href={`${API_BASE}/download-hits`} className="download-btn" target="_blank" rel="noreferrer">

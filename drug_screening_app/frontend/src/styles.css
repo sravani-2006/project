@@ -278,6 +278,49 @@ td {
   overflow-wrap: anywhere;
 }
 
+.strength-cell {
+  min-width: 135px;
+}
+
+.strength-chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.strength-weak {
+  color: #7e4a0f;
+  background: #ffeacc;
+  border-color: #f0c88e;
+}
+
+.strength-moderate {
+  color: #4f4f00;
+  background: #fff7c2;
+  border-color: #e7dc84;
+}
+
+.strength-good {
+  color: #0c4f53;
+  background: #d8f5f6;
+  border-color: #9edee2;
+}
+
+.strength-strong {
+  color: #184573;
+  background: #ddeeff;
+  border-color: #add0ff;
+}
+
+.strength-very-strong {
+  color: #1f4f1f;
+  background: #dff7df;
+  border-color: #aee5ae;
+}
+
 @keyframes riseIn {
   from {
     opacity: 0;
