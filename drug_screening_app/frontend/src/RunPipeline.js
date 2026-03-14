@@ -5,6 +5,7 @@ const API_BASE = "http://localhost:8000";
 function RunPipeline({ onPipelineDone, onStatus }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [maxLigands, setMaxLigands] = useState("50");
 
   const runVirtualScreening = async () => {
     try {
@@ -12,7 +13,7 @@ function RunPipeline({ onPipelineDone, onStatus }) {
       setError("");
 
       onStatus("Preparing protein");
-      let response = await fetch(`${API_BASE}/run-docking`, { method: "POST" });
+      let response = await fetch(`${API_BASE}/run-docking?max_ligands=${maxLigands}`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail || "Docking stage failed");
 
       onStatus("Filtering hits");
@@ -38,6 +39,23 @@ function RunPipeline({ onPipelineDone, onStatus }) {
   return (
     <section className="panel">
       <h2>Run Pipeline</h2>
+
+      <label className="run-size-label" htmlFor="run-size-select">
+        Molecules To Process
+      </label>
+      <select
+        id="run-size-select"
+        className="run-size-select"
+        value={maxLigands}
+        onChange={(e) => setMaxLigands(e.target.value)}
+        disabled={loading}
+      >
+        <option value="20">20 (fast)</option>
+        <option value="50">50 (recommended)</option>
+        <option value="100">100 (more clusters)</option>
+        <option value="0">Full uploaded dataset</option>
+      </select>
+
       <button onClick={runVirtualScreening} disabled={loading} className="run-button">
         {loading ? "Running..." : "Run Virtual Screening"}
       </button>

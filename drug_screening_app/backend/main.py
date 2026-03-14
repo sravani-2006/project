@@ -3,18 +3,22 @@ import shutil
 from datetime import datetime
 from typing import Any, Dict, List
 
-import matplotlib.pyplot as plt
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from clustering import cluster_hits
+from clustering import cluster_hits_from_distance
 from docking import run_docking
-from fingerprints import generate_morgan_fingerprints
+from fingerprints import generate_morgan_fingerprints, tanimoto_similarity_and_distance
 from hit_selection import filter_top_by_docking_score, select_cluster_representatives
 from ligand_prep import prepare_ligands
 from protein_prep import prepare_protein
+from visualization import (
+    save_chemical_space_pca,
+    save_cluster_distribution,
+    save_docking_score_distribution,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -45,6 +49,8 @@ pipeline_state: Dict[str, Any] = {
     "clustered_hits_path": None,
     "final_hits_path": None,
     "cluster_plot_path": None,
+    "docking_plot_path": None,
+    "pca_plot_path": None,
     "progress": [],
     "last_updated": None,
 }
@@ -64,29 +70,6 @@ def _safe_remove(path: str) -> None:
 def _save_upload_file(upload: UploadFile, destination: str) -> None:
     with open(destination, "wb") as out:
         shutil.copyfileobj(upload.file, out)
-
-
-def _build_cluster_distribution_plot(clustered_df: pd.DataFrame) -> str:
-    plot_path = os.path.join(OUTPUT_DIR, "cluster_distribution.png")
-
-    # Plot only non-noise clusters to highlight meaningful chemical series.
-    cluster_counts = (
-        clustered_df[clustered_df["cluster"] != -1]["cluster"]
-        .value_counts()
-        .sort_index()
-    )
-
-    plt.figure(figsize=(10, 4))
-    if len(cluster_counts) > 0:
-        plt.bar(cluster_counts.index.astype(str), cluster_counts.values)
-    plt.xlabel("Cluster")
-    plt.ylabel("Molecule Count")
-    plt.title("Cluster Size Distribution")
-    plt.tight_layout()
-    plt.savefig(plot_path, dpi=150)
-    plt.close()
-
-    return plot_path
 
 
 def _ensure_input_files() -> None:
@@ -198,7 +181,7 @@ async def upload_ligands(file: UploadFile = File(...)):
 
 
 @app.post("/run-docking")
-async def run_docking_endpoint():
+async def run_docking_endpoint(max_ligands: int = 50):
     _ensure_input_files()
 
     log_progress("Preparing protein")
@@ -206,8 +189,15 @@ async def run_docking_endpoint():
     pipeline_state["receptor_pdbqt"] = receptor_pdbqt
 
     log_progress("Preparing ligands")
-    # Demo cap: process first 50 ligands for more meaningful clustering.
-    prepared_ligands_df = prepare_ligands(pipeline_state["ligands_path"], LIGAND_PDBQT_DIR, max_ligands=50)
+    # Allow UI-driven run size while keeping safe defaults for demo responsiveness.
+    run_cap = max(0, int(max_ligands))
+    run_cap = min(run_cap, 5000)
+    max_ligands_arg = run_cap if run_cap > 0 else None
+    prepared_ligands_df = prepare_ligands(
+        pipeline_state["ligands_path"],
+        LIGAND_PDBQT_DIR,
+        max_ligands=max_ligands_arg,
+    )
     if prepared_ligands_df.empty:
         raise HTTPException(status_code=400, detail="No ligands were successfully prepared.")
 
@@ -225,6 +215,11 @@ async def run_docking_endpoint():
     docking_df.to_csv(docking_results_path, index=False)
     pipeline_state["docking_results_path"] = docking_results_path
 
+    docking_plot_path = save_docking_score_distribution(
+        docking_df, os.path.join(OUTPUT_DIR, "docking_score_distribution.png")
+    )
+    pipeline_state["docking_plot_path"] = docking_plot_path
+
     return {
         "message": "Docking completed",
         "docked_molecules": int(len(docking_df)),
@@ -233,7 +228,7 @@ async def run_docking_endpoint():
 
 
 @app.post("/filter-hits")
-async def filter_hits_endpoint(top_n: int = 8000):
+async def filter_hits_endpoint(top_n: int = 5000):
     path = pipeline_state["docking_results_path"]
     if not path or not os.path.exists(path):
         raise HTTPException(status_code=400, detail="Run docking first.")
@@ -271,8 +266,11 @@ async def run_clustering_endpoint(eps: float = 0.7, min_samples: int = 2):
     if len(filtered_df) == 0:
         raise HTTPException(status_code=400, detail="No valid molecules for fingerprint generation.")
 
+    log_progress("Calculating similarity")
+    _, distance_matrix = tanimoto_similarity_and_distance(fp_matrix)
+
     log_progress("Clustering molecules")
-    clustered_df = cluster_hits(filtered_df, fp_matrix, eps=eps, min_samples=min_samples)
+    clustered_df = cluster_hits_from_distance(filtered_df, distance_matrix, eps=eps, min_samples=min_samples)
     clustered_hits_path = os.path.join(OUTPUT_DIR, "clustered_hits.csv")
     clustered_df.to_csv(clustered_hits_path, index=False)
     pipeline_state["clustered_hits_path"] = clustered_hits_path
@@ -283,8 +281,15 @@ async def run_clustering_endpoint(eps: float = 0.7, min_samples: int = 2):
     final_hits_df.to_csv(final_hits_path, index=False)
     pipeline_state["final_hits_path"] = final_hits_path
 
-    cluster_plot_path = _build_cluster_distribution_plot(clustered_df)
+    cluster_plot_path = save_cluster_distribution(clustered_df, os.path.join(OUTPUT_DIR, "cluster_distribution.png"))
     pipeline_state["cluster_plot_path"] = cluster_plot_path
+
+    pca_plot_path = save_chemical_space_pca(
+        fp_matrix,
+        clustered_df["cluster"],
+        os.path.join(OUTPUT_DIR, "chemical_space_pca.png"),
+    )
+    pipeline_state["pca_plot_path"] = pca_plot_path
 
     n_clusters = int(clustered_df[clustered_df["cluster"] != -1]["cluster"].nunique())
 
@@ -344,8 +349,13 @@ async def get_results():
         "number_of_clusters": int(clustered_df[clustered_df["cluster"] != -1]["cluster"].nunique()) if not clustered_df.empty else 0,
         "final_hit_molecules": int(len(final_df)),
         "cluster_distribution": cluster_distribution,
+        "docking_results": docking_df.to_dict(orient="records"),
+        "top_hits": top_hits_df.to_dict(orient="records"),
+        "clustered_hits": clustered_df.to_dict(orient="records") if not clustered_df.empty else [],
         "final_hits": final_df.to_dict(orient="records"),
-        "cluster_plot_download": "/download-cluster-plot" if pipeline_state["cluster_plot_path"] else None,
+        "docking_plot_download": "/download-plot/docking" if pipeline_state["docking_plot_path"] else None,
+        "cluster_plot_download": "/download-plot/cluster" if pipeline_state["cluster_plot_path"] else None,
+        "pca_plot_download": "/download-plot/pca" if pipeline_state["pca_plot_path"] else None,
     }
 
 
@@ -357,9 +367,17 @@ async def download_hits():
     return FileResponse(file_path, media_type="text/csv", filename="final_hits.csv")
 
 
-@app.get("/download-cluster-plot")
-async def download_cluster_plot():
-    file_path = pipeline_state["cluster_plot_path"]
+@app.get("/download-plot/{plot_kind}")
+async def download_plot(plot_kind: str):
+    mapping = {
+        "docking": (pipeline_state["docking_plot_path"], "docking_score_distribution.png"),
+        "cluster": (pipeline_state["cluster_plot_path"], "cluster_distribution.png"),
+        "pca": (pipeline_state["pca_plot_path"], "chemical_space_pca.png"),
+    }
+    if plot_kind not in mapping:
+        raise HTTPException(status_code=404, detail="Unknown plot type")
+
+    file_path, filename = mapping[plot_kind]
     if not file_path or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="No cluster plot available yet.")
-    return FileResponse(file_path, media_type="image/png", filename="cluster_distribution.png")
+        raise HTTPException(status_code=404, detail=f"No {plot_kind} plot available yet.")
+    return FileResponse(file_path, media_type="image/png", filename=filename)
