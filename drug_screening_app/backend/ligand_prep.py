@@ -43,7 +43,11 @@ def _convert_mol_to_pdbqt(mol, output_path: str) -> bool:
             os.remove(tmp_path)
 
 
-def prepare_ligands(ligands_csv_path: str, output_dir: str, max_ligands: Optional[int] = None) -> pd.DataFrame:
+def prepare_ligands(
+    ligands_csv_path: str,
+    output_dir: str,
+    max_ligands: Optional[int] = None,
+) -> pd.DataFrame:
     """
     Convert ligand SMILES into 3D structures and PDBQT files.
 
