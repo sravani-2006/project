@@ -1,0 +1,248 @@
+:root {
+  --ink: #18222d;
+  --muted: #4f6277;
+  --bg: #f3efe7;
+  --panel: #fffefb;
+  --brand: #d44d2c;
+  --brand-dark: #962f17;
+  --line: #e7d8c3;
+  --ok: #1e8a5d;
+  --error: #b42318;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 20% 20%, #f9d9ae 0%, transparent 35%),
+    radial-gradient(circle at 80% 10%, #f8f0d2 0%, transparent 40%),
+    linear-gradient(160deg, #fef7ec 0%, #f2ece2 100%);
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.hero {
+  padding: 2rem 1.2rem;
+}
+
+.hero-content {
+  max-width: 980px;
+  margin: 0 auto;
+  background: linear-gradient(120deg, #fff6ea, #fffdf7);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 1.4rem;
+  box-shadow: 0 12px 30px rgba(64, 39, 8, 0.09);
+  animation: riseIn 600ms ease-out;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  letter-spacing: 0.02em;
+}
+
+.hero p {
+  margin: 0.7rem 0 0;
+  color: var(--muted);
+}
+
+.content-grid {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.2rem 2rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1rem;
+  box-shadow: 0 8px 20px rgba(17, 25, 40, 0.06);
+  animation: riseIn 500ms ease-out;
+}
+
+.results-panel {
+  grid-column: 1 / -1;
+}
+
+h2 {
+  margin-top: 0;
+  margin-bottom: 0.8rem;
+}
+
+h3 {
+  margin: 1rem 0 0.6rem;
+}
+
+input[type="file"] {
+  width: 100%;
+  margin-bottom: 0.8rem;
+}
+
+button,
+.download-btn {
+  display: inline-block;
+  border: none;
+  border-radius: 10px;
+  padding: 0.65rem 1rem;
+  background: var(--brand);
+  color: #fff;
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: 600;
+  transition: transform 120ms ease, background 160ms ease;
+}
+
+button:hover,
+.download-btn:hover {
+  background: var(--brand-dark);
+  transform: translateY(-1px);
+}
+
+.run-button {
+  width: 100%;
+  font-size: 1rem;
+}
+
+.status,
+.status-line {
+  color: var(--muted);
+  margin-top: 0.7rem;
+}
+
+.error {
+  color: var(--error);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.stat-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem;
+}
+
+.stat-card h3 {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.stat-card p {
+  margin: 0.5rem 0 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.chart-wrap {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 0.6rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.bar-label {
+  font-size: 0.85rem;
+}
+
+.bar-track {
+  background: #f4ead8;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  min-height: 24px;
+  background: linear-gradient(90deg, #d45922, #f09b3f);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 0.4rem;
+}
+
+.download-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.smiles-cell {
+  max-width: 420px;
+  overflow-wrap: anywhere;
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 900px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bar-row {
+    grid-template-columns: 1fr;
+  }
+}

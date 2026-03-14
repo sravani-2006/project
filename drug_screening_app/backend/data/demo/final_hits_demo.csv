@@ -1,0 +1,8 @@
+ligand_id,smiles,docking_score,cluster
+CHEMBL939,COc1cc2ncnc(Nc3ccc(F)c(Cl)c3)c2cc1OCCCN1CCOCC1,-11.316,0
+CHEMBL509032,COc1cc(N2CCC(N3CCN(C)CC3)CC2)ccc1Nc1ncc(Cl)c(Nc2ccccc2S(=O)(=O)C(C)C)n1,-11.067,1
+CHEMBL2165191,Cc1cc([C@@H](C)Nc2ccccc2C(=O)O)c2nc(N3CCOCC3)cc(=O)n2c1,-10.781,2
+CHEMBL1289926,CNC(=O)c1ccccc1Sc1ccc2c(/C=C/c3ccccn3)n[nH]c2c1,-10.173,3
+CHEMBL94657,C/C(=C\c1csc(C)n1)[C@@H]1C[C@@H]2O[C@]2(C)CCC[C@H](C)[C@H](O)[C@@H](C)C(=O)C(C)(C)[C@@H](O)CC(=O)O1,-9.72,4
+CHEMBL188678,O=c1cc(N2CCOCC2)oc2c(-c3cccc4c3sc3ccccc34)cccc12,-9.644,5
+CHEMBL1190711,COc1ccc(-c2cc3nccn3c(Nc3ncccc3C(N)=O)n2)cc1OC,-9.559,6

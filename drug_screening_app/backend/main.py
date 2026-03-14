@@ -1,0 +1,365 @@
+import os
+import shutil
+from datetime import datetime
+from typing import Any, Dict, List
+
+import matplotlib.pyplot as plt
+import pandas as pd
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+
+from clustering import cluster_hits
+from docking import run_docking
+from fingerprints import generate_morgan_fingerprints
+from hit_selection import filter_top_by_docking_score, select_cluster_representatives
+from ligand_prep import prepare_ligands
+from protein_prep import prepare_protein
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+OUTPUT_DIR = os.path.join(DATA_DIR, "outputs")
+LIGAND_PDBQT_DIR = os.path.join(DATA_DIR, "ligands_pdbqt")
+DOCKING_DIR = os.path.join(DATA_DIR, "docking")
+
+for folder in [DATA_DIR, UPLOAD_DIR, OUTPUT_DIR, LIGAND_PDBQT_DIR, DOCKING_DIR]:
+    os.makedirs(folder, exist_ok=True)
+
+app = FastAPI(title="Virtual Screening and Clustering API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+pipeline_state: Dict[str, Any] = {
+    "protein_path": None,
+    "ligands_path": None,
+    "receptor_pdbqt": None,
+    "docking_results_path": None,
+    "top_hits_path": None,
+    "clustered_hits_path": None,
+    "final_hits_path": None,
+    "cluster_plot_path": None,
+    "progress": [],
+    "last_updated": None,
+}
+
+
+def log_progress(message: str) -> None:
+    print(message)
+    pipeline_state["progress"].append(message)
+    pipeline_state["last_updated"] = datetime.utcnow().isoformat()
+
+
+def _safe_remove(path: str) -> None:
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def _save_upload_file(upload: UploadFile, destination: str) -> None:
+    with open(destination, "wb") as out:
+        shutil.copyfileobj(upload.file, out)
+
+
+def _build_cluster_distribution_plot(clustered_df: pd.DataFrame) -> str:
+    plot_path = os.path.join(OUTPUT_DIR, "cluster_distribution.png")
+
+    # Plot only non-noise clusters to highlight meaningful chemical series.
+    cluster_counts = (
+        clustered_df[clustered_df["cluster"] != -1]["cluster"]
+        .value_counts()
+        .sort_index()
+    )
+
+    plt.figure(figsize=(10, 4))
+    if len(cluster_counts) > 0:
+        plt.bar(cluster_counts.index.astype(str), cluster_counts.values)
+    plt.xlabel("Cluster")
+    plt.ylabel("Molecule Count")
+    plt.title("Cluster Size Distribution")
+    plt.tight_layout()
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+
+    return plot_path
+
+
+def _ensure_input_files() -> None:
+    if not pipeline_state["protein_path"] or not os.path.exists(pipeline_state["protein_path"]):
+        raise HTTPException(status_code=400, detail="Protein file not uploaded yet.")
+    if not pipeline_state["ligands_path"] or not os.path.exists(pipeline_state["ligands_path"]):
+        raise HTTPException(status_code=400, detail="Ligand CSV not uploaded yet.")
+
+
+@app.post("/upload-protein")
+async def upload_protein(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".pdb"):
+        raise HTTPException(status_code=400, detail="Protein file must be a .pdb file")
+
+    destination = os.path.join(UPLOAD_DIR, "protein.pdb")
+    _save_upload_file(file, destination)
+
+    pipeline_state["protein_path"] = destination
+    pipeline_state["progress"] = ["Protein uploaded"]
+    pipeline_state["last_updated"] = datetime.utcnow().isoformat()
+
+    return {"message": "Protein uploaded successfully", "path": destination}
+
+
+def _normalise_ligand_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remap common alternative column names to the required ligand_id / smiles names.
+    Handles ChEMBL exports and other common formats.
+    """
+    col_set = set(df.columns)
+
+    SMILES_ALIASES = ["Smiles", "SMILES", "smiles", "canonical_smiles", "CanonicalSMILES", "smi"]
+    ID_ALIASES = [
+        "Molecule ChEMBL ID", "chembl_id", "ChEMBL ID",
+        "ID", "id", "Name", "name", "CID", "mol_id", "ligand_id", "zinc_id",
+    ]
+
+    if "smiles" not in col_set:
+        smiles_col = next((c for c in SMILES_ALIASES if c in col_set), None)
+        if smiles_col:
+            df = df.rename(columns={smiles_col: "smiles"})
+
+    if "ligand_id" not in col_set:
+        id_col = next((c for c in ID_ALIASES if c in col_set), None)
+        if id_col:
+            df = df.rename(columns={id_col: "ligand_id"})
+        else:
+            df["ligand_id"] = [f"mol_{i + 1:05d}" for i in range(len(df))]
+
+    return df
+
+
+@app.post("/upload-ligands")
+async def upload_ligands(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Ligand file must be a .csv file")
+
+    destination = os.path.join(UPLOAD_DIR, "ligands.csv")
+    _save_upload_file(file, destination)
+
+    try:
+        # Auto-detect separator: ChEMBL exports use ; while standard CSVs use ,
+        with open(destination, "r", encoding="utf-8", errors="replace") as _f:
+            first_line = _f.readline()
+        sep = ";" if first_line.count(";") > first_line.count(",") else ","
+
+        ligands_df = pd.read_csv(
+            destination,
+            sep=sep,
+            engine="python",
+            on_bad_lines="skip",
+            encoding="utf-8",
+            encoding_errors="replace",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not parse CSV file: {exc}",
+        )
+
+    # Remap ChEMBL / alternative column names to ligand_id and smiles
+    ligands_df = _normalise_ligand_df(ligands_df)
+
+    required = {"ligand_id", "smiles"}
+    if not required.issubset(set(ligands_df.columns)):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Could not find SMILES or ID columns. "
+                f"Columns detected: {list(ligands_df.columns)}. "
+                f"Expected a column named one of: Smiles, SMILES, canonical_smiles "
+                f"and an ID column like 'Molecule ChEMBL ID', ID, Name, CID."
+            ),
+        )
+
+    # Drop rows with missing SMILES and save normalised file in place
+    ligands_df = ligands_df.dropna(subset=["smiles"])
+    ligands_df[["ligand_id", "smiles"]].to_csv(destination, index=False)
+
+    pipeline_state["ligands_path"] = destination
+    pipeline_state["progress"].append("Ligands uploaded")
+    pipeline_state["last_updated"] = datetime.utcnow().isoformat()
+
+    return {
+        "message": "Ligands uploaded successfully",
+        "path": destination,
+        "total_rows": int(len(ligands_df)),
+    }
+
+
+@app.post("/run-docking")
+async def run_docking_endpoint():
+    _ensure_input_files()
+
+    log_progress("Preparing protein")
+    receptor_pdbqt = prepare_protein(pipeline_state["protein_path"], OUTPUT_DIR, receptor_name="protein")
+    pipeline_state["receptor_pdbqt"] = receptor_pdbqt
+
+    log_progress("Preparing ligands")
+    # Demo cap: process first 50 ligands for more meaningful clustering.
+    prepared_ligands_df = prepare_ligands(pipeline_state["ligands_path"], LIGAND_PDBQT_DIR, max_ligands=50)
+    if prepared_ligands_df.empty:
+        raise HTTPException(status_code=400, detail="No ligands were successfully prepared.")
+
+    log_progress("Running docking")
+    # Default search box center/size can be updated once the user knows target pocket coordinates.
+    docking_df = run_docking(
+        receptor_pdbqt=receptor_pdbqt,
+        ligands_df=prepared_ligands_df,
+        output_dir=DOCKING_DIR,
+        center={"x": 0.0, "y": 0.0, "z": 0.0},
+        size={"x": 20.0, "y": 20.0, "z": 20.0},
+    )
+
+    docking_results_path = os.path.join(OUTPUT_DIR, "docking_results.csv")
+    docking_df.to_csv(docking_results_path, index=False)
+    pipeline_state["docking_results_path"] = docking_results_path
+
+    return {
+        "message": "Docking completed",
+        "docked_molecules": int(len(docking_df)),
+        "output": docking_results_path,
+    }
+
+
+@app.post("/filter-hits")
+async def filter_hits_endpoint(top_n: int = 8000):
+    path = pipeline_state["docking_results_path"]
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=400, detail="Run docking first.")
+
+    log_progress("Filtering hits")
+    docking_df = pd.read_csv(path)
+    if docking_df.empty:
+        raise HTTPException(status_code=400, detail="Docking results are empty.")
+
+    top_hits_df = filter_top_by_docking_score(docking_df, top_n=top_n)
+    top_hits_path = os.path.join(OUTPUT_DIR, "top_hits.csv")
+    top_hits_df.to_csv(top_hits_path, index=False)
+
+    pipeline_state["top_hits_path"] = top_hits_path
+
+    return {
+        "message": "Top hits generated",
+        "selected": int(len(top_hits_df)),
+        "output": top_hits_path,
+    }
+
+
+@app.post("/run-clustering")
+async def run_clustering_endpoint(eps: float = 0.7, min_samples: int = 2):
+    top_hits_path = pipeline_state["top_hits_path"]
+    if not top_hits_path or not os.path.exists(top_hits_path):
+        raise HTTPException(status_code=400, detail="Run /filter-hits first.")
+
+    top_hits_df = pd.read_csv(top_hits_path)
+    if top_hits_df.empty:
+        raise HTTPException(status_code=400, detail="Top hits are empty.")
+
+    log_progress("Generating fingerprints")
+    filtered_df, fp_matrix = generate_morgan_fingerprints(top_hits_df, radius=2, n_bits=1024)
+    if len(filtered_df) == 0:
+        raise HTTPException(status_code=400, detail="No valid molecules for fingerprint generation.")
+
+    log_progress("Clustering molecules")
+    clustered_df = cluster_hits(filtered_df, fp_matrix, eps=eps, min_samples=min_samples)
+    clustered_hits_path = os.path.join(OUTPUT_DIR, "clustered_hits.csv")
+    clustered_df.to_csv(clustered_hits_path, index=False)
+    pipeline_state["clustered_hits_path"] = clustered_hits_path
+
+    log_progress("Selecting diverse hits")
+    final_hits_df = select_cluster_representatives(clustered_df)
+    final_hits_path = os.path.join(OUTPUT_DIR, "final_hits.csv")
+    final_hits_df.to_csv(final_hits_path, index=False)
+    pipeline_state["final_hits_path"] = final_hits_path
+
+    cluster_plot_path = _build_cluster_distribution_plot(clustered_df)
+    pipeline_state["cluster_plot_path"] = cluster_plot_path
+
+    n_clusters = int(clustered_df[clustered_df["cluster"] != -1]["cluster"].nunique())
+
+    return {
+        "message": "Clustering and representative hit selection completed",
+        "clusters": n_clusters,
+        "final_hits": int(len(final_hits_df)),
+        "clustered_output": clustered_hits_path,
+        "final_hits_output": final_hits_path,
+    }
+
+
+@app.post("/run-full-pipeline")
+async def run_full_pipeline():
+    await run_docking_endpoint()
+    await filter_hits_endpoint()
+    await run_clustering_endpoint()
+
+    return {
+        "message": "Full pipeline completed",
+        "results_endpoint": "/results",
+        "download_endpoint": "/download-hits",
+    }
+
+
+@app.get("/results")
+async def get_results():
+    docking_path = pipeline_state["docking_results_path"]
+    top_hits_path = pipeline_state["top_hits_path"]
+    clustered_path = pipeline_state["clustered_hits_path"]
+    final_path = pipeline_state["final_hits_path"]
+
+    if not final_path or not os.path.exists(final_path):
+        return {
+            "status": "pending",
+            "progress": pipeline_state["progress"],
+            "message": "Pipeline not completed yet",
+        }
+
+    docking_df = pd.read_csv(docking_path) if docking_path and os.path.exists(docking_path) else pd.DataFrame()
+    top_hits_df = pd.read_csv(top_hits_path) if top_hits_path and os.path.exists(top_hits_path) else pd.DataFrame()
+    clustered_df = pd.read_csv(clustered_path) if clustered_path and os.path.exists(clustered_path) else pd.DataFrame()
+    final_df = pd.read_csv(final_path)
+
+    cluster_distribution: List[Dict[str, Any]] = []
+    if not clustered_df.empty:
+        counts = clustered_df[clustered_df["cluster"] != -1]["cluster"].value_counts().sort_index()
+        cluster_distribution = [
+            {"cluster": int(cluster_id), "size": int(size)} for cluster_id, size in counts.items()
+        ]
+
+    return {
+        "status": "completed",
+        "progress": pipeline_state["progress"],
+        "total_molecules_screened": int(len(docking_df)),
+        "top_molecules_selected": int(len(top_hits_df)),
+        "number_of_clusters": int(clustered_df[clustered_df["cluster"] != -1]["cluster"].nunique()) if not clustered_df.empty else 0,
+        "final_hit_molecules": int(len(final_df)),
+        "cluster_distribution": cluster_distribution,
+        "final_hits": final_df.to_dict(orient="records"),
+        "cluster_plot_download": "/download-cluster-plot" if pipeline_state["cluster_plot_path"] else None,
+    }
+
+
+@app.get("/download-hits")
+async def download_hits():
+    file_path = pipeline_state["final_hits_path"]
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="No final hits available yet.")
+    return FileResponse(file_path, media_type="text/csv", filename="final_hits.csv")
+
+
+@app.get("/download-cluster-plot")
+async def download_cluster_plot():
+    file_path = pipeline_state["cluster_plot_path"]
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="No cluster plot available yet.")
+    return FileResponse(file_path, media_type="image/png", filename="cluster_distribution.png")
