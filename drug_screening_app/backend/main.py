@@ -14,10 +14,18 @@ from fingerprints import generate_morgan_fingerprints, tanimoto_similarity_and_d
 from hit_selection import filter_top_by_docking_score, select_cluster_representatives
 from ligand_prep import prepare_ligands
 from protein_prep import prepare_protein
+from strategy_evaluation import evaluate_strategies
+from strategy_selection import (
+    select_greedy_diversity_hits,
+    select_multiobjective_hits,
+    select_score_only_hits,
+)
 from visualization import (
     save_chemical_space_pca,
     save_cluster_distribution,
     save_docking_score_distribution,
+    save_strategy_chemical_space_pca,
+    save_strategy_metric_comparison,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -48,9 +56,17 @@ pipeline_state: Dict[str, Any] = {
     "top_hits_path": None,
     "clustered_hits_path": None,
     "final_hits_path": None,
+    "strategy1_path": None,
+    "strategy2_path": None,
+    "strategy3_path": None,
+    "strategy4_path": None,
+    "strategy_evaluation_path": None,
     "cluster_plot_path": None,
     "docking_plot_path": None,
     "pca_plot_path": None,
+    "strategy_score_plot_path": None,
+    "strategy_diversity_plot_path": None,
+    "strategy_pca_plot_path": None,
     "progress": [],
     "last_updated": None,
 }
@@ -302,11 +318,99 @@ async def run_clustering_endpoint(eps: float = 0.7, min_samples: int = 2):
     }
 
 
+@app.post("/run-strategy-analysis")
+async def run_strategy_analysis_endpoint(k: int = 20):
+    docking_path = pipeline_state["docking_results_path"]
+    if not docking_path or not os.path.exists(docking_path):
+        raise HTTPException(status_code=400, detail="Run docking first.")
+
+    k = max(1, int(k))
+
+    # Ensure DBSCAN strategy artifacts exist for fair comparison.
+    if not pipeline_state["top_hits_path"] or not os.path.exists(pipeline_state["top_hits_path"]):
+        await filter_hits_endpoint()
+    if not pipeline_state["final_hits_path"] or not os.path.exists(pipeline_state["final_hits_path"]):
+        await run_clustering_endpoint()
+
+    log_progress("Running Strategy 1 (Score Only)")
+    docking_df = pd.read_csv(docking_path)
+    strategy1_df = select_score_only_hits(docking_df, k=k)
+    strategy1_path = os.path.join(OUTPUT_DIR, "strategy1_score_only_hits.csv")
+    strategy1_df.to_csv(strategy1_path, index=False)
+    pipeline_state["strategy1_path"] = strategy1_path
+
+    log_progress("Preparing Strategy 2 (DBSCAN Selection)")
+    strategy2_source = pd.read_csv(pipeline_state["final_hits_path"])
+    strategy2_df = strategy2_source[["ligand_id", "smiles", "docking_score", "cluster"]].copy()
+    strategy2_df = strategy2_df.sort_values("docking_score", ascending=True).head(k).reset_index(drop=True)
+    strategy2_path = os.path.join(OUTPUT_DIR, "strategy2_dbscan_hits.csv")
+    strategy2_df.to_csv(strategy2_path, index=False)
+    pipeline_state["strategy2_path"] = strategy2_path
+
+    log_progress("Running Strategy 3 (Greedy Diversity)")
+    strategy3_df = select_greedy_diversity_hits(docking_df, k=k)
+    strategy3_path = os.path.join(OUTPUT_DIR, "strategy3_greedy_diversity_hits.csv")
+    strategy3_df.to_csv(strategy3_path, index=False)
+    pipeline_state["strategy3_path"] = strategy3_path
+
+    log_progress("Running Strategy 4 (Multi-Objective)")
+    strategy4_df = select_multiobjective_hits(docking_df, k=k)
+    strategy4_path = os.path.join(OUTPUT_DIR, "strategy4_multiobjective_hits.csv")
+    strategy4_df.to_csv(strategy4_path, index=False)
+    pipeline_state["strategy4_path"] = strategy4_path
+
+    log_progress("Evaluating strategies")
+    strategy_to_hits = {
+        "Strategy 1: Score Only": strategy1_df,
+        "Strategy 2: DBSCAN": strategy2_df,
+        "Strategy 3: Greedy Diversity": strategy3_df,
+        "Strategy 4: Multi-Objective": strategy4_df,
+    }
+    evaluation_df = evaluate_strategies(strategy_to_hits)
+    evaluation_path = os.path.join(OUTPUT_DIR, "strategy_evaluation.csv")
+    evaluation_df.to_csv(evaluation_path, index=False)
+    pipeline_state["strategy_evaluation_path"] = evaluation_path
+
+    score_plot_path = save_strategy_metric_comparison(
+        evaluation_df,
+        metric_column="average_docking_score",
+        title="Average Docking Score by Strategy",
+        y_label="Average Docking Score",
+        output_path=os.path.join(OUTPUT_DIR, "strategy_score_comparison.png"),
+    )
+    diversity_plot_path = save_strategy_metric_comparison(
+        evaluation_df,
+        metric_column="average_similarity",
+        title="Average Similarity by Strategy",
+        y_label="Average Pairwise Similarity",
+        output_path=os.path.join(OUTPUT_DIR, "strategy_diversity_comparison.png"),
+    )
+    strategy_pca_plot_path = save_strategy_chemical_space_pca(
+        strategy_to_hits,
+        output_path=os.path.join(OUTPUT_DIR, "chemical_space_pca.png"),
+    )
+
+    pipeline_state["strategy_score_plot_path"] = score_plot_path
+    pipeline_state["strategy_diversity_plot_path"] = diversity_plot_path
+    pipeline_state["strategy_pca_plot_path"] = strategy_pca_plot_path
+
+    return {
+        "message": "Strategy analysis completed",
+        "selected_per_strategy": k,
+        "strategy1_output": strategy1_path,
+        "strategy2_output": strategy2_path,
+        "strategy3_output": strategy3_path,
+        "strategy4_output": strategy4_path,
+        "evaluation_output": evaluation_path,
+    }
+
+
 @app.post("/run-full-pipeline")
 async def run_full_pipeline():
     await run_docking_endpoint()
     await filter_hits_endpoint()
     await run_clustering_endpoint()
+    await run_strategy_analysis_endpoint()
 
     return {
         "message": "Full pipeline completed",
@@ -321,6 +425,11 @@ async def get_results():
     top_hits_path = pipeline_state["top_hits_path"]
     clustered_path = pipeline_state["clustered_hits_path"]
     final_path = pipeline_state["final_hits_path"]
+    strategy1_path = pipeline_state["strategy1_path"]
+    strategy2_path = pipeline_state["strategy2_path"]
+    strategy3_path = pipeline_state["strategy3_path"]
+    strategy4_path = pipeline_state["strategy4_path"]
+    evaluation_path = pipeline_state["strategy_evaluation_path"]
 
     if not final_path or not os.path.exists(final_path):
         return {
@@ -333,6 +442,13 @@ async def get_results():
     top_hits_df = pd.read_csv(top_hits_path) if top_hits_path and os.path.exists(top_hits_path) else pd.DataFrame()
     clustered_df = pd.read_csv(clustered_path) if clustered_path and os.path.exists(clustered_path) else pd.DataFrame()
     final_df = pd.read_csv(final_path)
+    strategy1_df = pd.read_csv(strategy1_path) if strategy1_path and os.path.exists(strategy1_path) else pd.DataFrame()
+    strategy2_df = pd.read_csv(strategy2_path) if strategy2_path and os.path.exists(strategy2_path) else pd.DataFrame()
+    strategy3_df = pd.read_csv(strategy3_path) if strategy3_path and os.path.exists(strategy3_path) else pd.DataFrame()
+    strategy4_df = pd.read_csv(strategy4_path) if strategy4_path and os.path.exists(strategy4_path) else pd.DataFrame()
+    evaluation_df = pd.read_csv(evaluation_path) if evaluation_path and os.path.exists(evaluation_path) else pd.DataFrame()
+    if not evaluation_df.empty:
+        evaluation_df = evaluation_df.where(pd.notna(evaluation_df), None)
 
     cluster_distribution: List[Dict[str, Any]] = []
     if not clustered_df.empty:
@@ -353,9 +469,23 @@ async def get_results():
         "top_hits": top_hits_df.to_dict(orient="records"),
         "clustered_hits": clustered_df.to_dict(orient="records") if not clustered_df.empty else [],
         "final_hits": final_df.to_dict(orient="records"),
+        "strategy1_hits": strategy1_df.to_dict(orient="records") if not strategy1_df.empty else [],
+        "strategy2_hits": strategy2_df.to_dict(orient="records") if not strategy2_df.empty else [],
+        "strategy3_hits": strategy3_df.to_dict(orient="records") if not strategy3_df.empty else [],
+        "strategy4_hits": strategy4_df.to_dict(orient="records") if not strategy4_df.empty else [],
+        "strategy_evaluation": evaluation_df.to_dict(orient="records") if not evaluation_df.empty else [],
+        "strategy_comparison_table": evaluation_df.to_dict(orient="records") if not evaluation_df.empty else [],
         "docking_plot_download": "/download-plot/docking" if pipeline_state["docking_plot_path"] else None,
         "cluster_plot_download": "/download-plot/cluster" if pipeline_state["cluster_plot_path"] else None,
         "pca_plot_download": "/download-plot/pca" if pipeline_state["pca_plot_path"] else None,
+        "strategy_score_plot_download": "/download-plot/strategy-score" if pipeline_state["strategy_score_plot_path"] else None,
+        "strategy_diversity_plot_download": "/download-plot/strategy-diversity" if pipeline_state["strategy_diversity_plot_path"] else None,
+        "strategy_pca_plot_download": "/download-plot/strategy-pca" if pipeline_state["strategy_pca_plot_path"] else None,
+        "strategy1_download": "/download-strategy/score-only" if pipeline_state["strategy1_path"] else None,
+        "strategy2_download": "/download-strategy/dbscan" if pipeline_state["strategy2_path"] else None,
+        "strategy3_download": "/download-strategy/greedy-diversity" if pipeline_state["strategy3_path"] else None,
+        "strategy4_download": "/download-strategy/multi-objective" if pipeline_state["strategy4_path"] else None,
+        "strategy_evaluation_download": "/download-evaluation" if pipeline_state["strategy_evaluation_path"] else None,
     }
 
 
@@ -367,12 +497,40 @@ async def download_hits():
     return FileResponse(file_path, media_type="text/csv", filename="final_hits.csv")
 
 
+@app.get("/download-strategy/{strategy_id}")
+async def download_strategy(strategy_id: str):
+    mapping = {
+        "score-only": (pipeline_state["strategy1_path"], "strategy1_score_only_hits.csv"),
+        "dbscan": (pipeline_state["strategy2_path"], "strategy2_dbscan_hits.csv"),
+        "greedy-diversity": (pipeline_state["strategy3_path"], "strategy3_greedy_diversity_hits.csv"),
+        "multi-objective": (pipeline_state["strategy4_path"], "strategy4_multiobjective_hits.csv"),
+    }
+    if strategy_id not in mapping:
+        raise HTTPException(status_code=404, detail="Unknown strategy")
+
+    file_path, filename = mapping[strategy_id]
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"No output for strategy '{strategy_id}' yet.")
+    return FileResponse(file_path, media_type="text/csv", filename=filename)
+
+
+@app.get("/download-evaluation")
+async def download_evaluation():
+    file_path = pipeline_state["strategy_evaluation_path"]
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="No strategy evaluation available yet.")
+    return FileResponse(file_path, media_type="text/csv", filename="strategy_evaluation.csv")
+
+
 @app.get("/download-plot/{plot_kind}")
 async def download_plot(plot_kind: str):
     mapping = {
         "docking": (pipeline_state["docking_plot_path"], "docking_score_distribution.png"),
         "cluster": (pipeline_state["cluster_plot_path"], "cluster_distribution.png"),
         "pca": (pipeline_state["pca_plot_path"], "chemical_space_pca.png"),
+        "strategy-score": (pipeline_state["strategy_score_plot_path"], "strategy_score_comparison.png"),
+        "strategy-diversity": (pipeline_state["strategy_diversity_plot_path"], "strategy_diversity_comparison.png"),
+        "strategy-pca": (pipeline_state["strategy_pca_plot_path"], "chemical_space_pca.png"),
     }
     if plot_kind not in mapping:
         raise HTTPException(status_code=404, detail="Unknown plot type")

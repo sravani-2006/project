@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://127.0.0.1:8000";
 
 function RunPipeline({ onPipelineDone, onStatus }) {
   const [loading, setLoading] = useState(false);
@@ -25,6 +25,10 @@ function RunPipeline({ onPipelineDone, onStatus }) {
       onStatus("Selecting diverse hits");
       response = await fetch(`${API_BASE}/run-clustering`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail || "Clustering stage failed");
+
+      onStatus("Running hit-selection strategies");
+      response = await fetch(`${API_BASE}/run-strategy-analysis?k=20`, { method: "POST" });
+      if (!response.ok) throw new Error((await response.json()).detail || "Strategy analysis failed");
 
       onStatus("Pipeline complete");
       onPipelineDone();

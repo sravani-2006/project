@@ -19,5 +19,3 @@ CHEMBL888,Nc1ccn([C@@H]2O[C@H](CO)[C@@H](O)C2(F)F)c(=O)n1,-6.676,16
 CHEMBL512504,N#Cc1c(O)c2c(-c3ccc(-c4ccccc4O)cc3)csc2[nH]c1=O,-6.021,17
 CHEMBL252164,CCNC(=O)c1noc(-c2cc(C(C)C)c(O)cc2O)c1-c1ccc(CN2CCOCC2)cc1,-5.851,18
 CHEMBL105,CO[C@@]12[C@H](COC(N)=O)C3=C(C(=O)C(C)=C(N)C3=O)N1C[C@@H]1N[C@@H]12,-5.054,19
-CHEMBL449158,CCC/C=C/C=C/C(=O)O[C@H]1/C(=C/C(=O)OC)C[C@H]2C[C@H]([C@@H](C)O)OC(=O)C[C@H](O)C[C@@H]3C[C@H](OC(C)=O)C(C)(C)[C@](O)(C[C@@H]4C/C(=C/C(=O)OC)C[C@H](/C=C/C(C)(C)[C@]1(O)O2)O4)O3,-5.043,20
-CHEMBL259181,OC[C@H](Cc1ccccc1)Nc1nc(Oc2ccc3c(c2)CCC3)nc2c1ncn2Cc1ccc(-c2ccccc2)cc1,-5.004,21

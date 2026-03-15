@@ -1,0 +1,5 @@
+strategy,average_docking_score,average_similarity,redundancy_count
+Strategy 1: Score Only,-11.24045,0.14697577294502653,6
+Strategy 2: DBSCAN,-9.032299999999998,0.12049226715404758,0
+Strategy 3: Greedy Diversity,-8.102449999999997,0.09271128129348008,0
+Strategy 4: Multi-Objective,-11.24045,0.14697577294502653,6

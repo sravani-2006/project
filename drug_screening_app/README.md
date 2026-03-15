@@ -73,8 +73,11 @@ Frontend URL: `http://localhost:3000`
 3. `POST /run-docking`
 4. `POST /filter-hits`
 5. `POST /run-clustering`
-6. `GET /results`
-7. `GET /download-hits`
+6. `POST /run-strategy-analysis`
+7. `GET /download-strategy/{strategy_id}`
+8. `GET /download-evaluation`
+9. `GET /results`
+10. `GET /download-hits`
 
 Convenience endpoint:
 
@@ -89,6 +92,14 @@ Written to `backend/data/outputs/`:
 3. `clustered_hits.csv`
 4. `final_hits.csv`
 5. `cluster_distribution.png`
+6. `strategy1_score_only_hits.csv`
+7. `strategy2_dbscan_hits.csv`
+8. `strategy3_greedy_diversity_hits.csv`
+9. `strategy4_multiobjective_hits.csv`
+10. `strategy_evaluation.csv`
+11. `strategy_score_comparison.png`
+12. `strategy_diversity_comparison.png`
+13. `chemical_space_pca.png`
 
 ## Notes on Docking Tools
 

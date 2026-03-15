@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://127.0.0.1:8000";
 
 function getBindingStrength(score) {
   const value = Number(score);
@@ -75,9 +75,12 @@ function ResultsDashboard({ results, pipelineStatus }) {
   const tabs = useMemo(
     () => [
       { id: "docking", label: "Docking Results" },
-      { id: "top", label: "Top Hits" },
-      { id: "clusters", label: "Clusters" },
+      { id: "score_based", label: "Score-Based Selection" },
+      { id: "dbscan_combined", label: "DBSCAN and Clusters" },
       { id: "final", label: "Final Candidates" },
+      { id: "greedy", label: "Greedy Diversity" },
+      { id: "multi", label: "Multi-Objective" },
+      { id: "evaluation", label: "Evaluation" },
       { id: "viz", label: "Visualizations" },
     ],
     []
@@ -98,6 +101,68 @@ function ResultsDashboard({ results, pipelineStatus }) {
     },
     { key: "cluster", label: "Cluster" },
   ];
+
+  const strategyColumns = [
+    { key: "ligand_id", label: "Ligand ID" },
+    { key: "smiles", label: "SMILES" },
+    { key: "docking_score", label: "Docking Score" },
+  ];
+
+  const strategy2Columns = [
+    { key: "ligand_id", label: "Ligand ID" },
+    { key: "smiles", label: "SMILES" },
+    { key: "docking_score", label: "Docking Score" },
+    { key: "cluster", label: "Cluster" },
+  ];
+
+  const strategy4Columns = [
+    { key: "ligand_id", label: "Ligand ID" },
+    { key: "smiles", label: "SMILES" },
+    { key: "docking_score", label: "Docking Score" },
+    {
+      key: "diversity_score",
+      label: "Diversity Score",
+      render: (row) => {
+        const value = Number(row.diversity_score);
+        return Number.isFinite(value) ? value.toFixed(4) : "";
+      },
+    },
+    {
+      key: "final_score",
+      label: "Final Score",
+      render: (row) => {
+        const value = Number(row.final_score);
+        return Number.isFinite(value) ? value.toFixed(4) : "";
+      },
+    },
+  ];
+
+  const evaluationColumns = [
+    { key: "strategy", label: "Strategy" },
+    {
+      key: "average_docking_score",
+      label: "Average Docking Score",
+      render: (row) => {
+        const value = Number(row.average_docking_score);
+        return Number.isFinite(value) ? value.toFixed(4) : "";
+      },
+    },
+    {
+      key: "average_similarity",
+      label: "Average Similarity",
+      render: (row) => {
+        const value = Number(row.average_similarity);
+        return Number.isFinite(value) ? value.toFixed(4) : "";
+      },
+    },
+    { key: "redundancy_count", label: "Redundancy Count" },
+  ];
+
+  const scoreBasedRows =
+    results?.strategy1_hits?.length > 0 ? results.strategy1_hits : (results?.top_hits || []);
+
+  const dbscanCombinedRows =
+    results?.strategy2_hits?.length > 0 ? results.strategy2_hits : (results?.clustered_hits || []);
 
   return (
     <section className="panel results-panel">
@@ -168,6 +233,11 @@ function ResultsDashboard({ results, pipelineStatus }) {
             <a href={`${API_BASE}/download-hits`} className="download-btn" target="_blank" rel="noreferrer">
               Download final_hits.csv
             </a>
+            {results.strategy_evaluation_download ? (
+              <a href={`${API_BASE}${results.strategy_evaluation_download}`} className="download-btn" target="_blank" rel="noreferrer">
+                Download strategy_evaluation.csv
+              </a>
+            ) : null}
             {results.docking_plot_download ? (
               <a href={`${API_BASE}${results.docking_plot_download}`} className="download-btn" target="_blank" rel="noreferrer">
                 Download docking score PNG
@@ -198,9 +268,22 @@ function ResultsDashboard({ results, pipelineStatus }) {
           </div>
 
           {activeTab === "docking" ? <ResultsTable rows={results.docking_results || []} columns={columns} /> : null}
-          {activeTab === "top" ? <ResultsTable rows={results.top_hits || []} columns={columns} /> : null}
-          {activeTab === "clusters" ? <ResultsTable rows={results.clustered_hits || []} columns={columns} /> : null}
+          {activeTab === "score_based" ? (
+            <ResultsTable rows={scoreBasedRows} columns={strategyColumns} />
+          ) : null}
+          {activeTab === "dbscan_combined" ? (
+            <ResultsTable rows={dbscanCombinedRows} columns={strategy2Columns} />
+          ) : null}
           {activeTab === "final" ? <ResultsTable rows={results.final_hits || []} columns={columns} /> : null}
+          {activeTab === "greedy" ? (
+            <ResultsTable rows={results.strategy3_hits || []} columns={strategyColumns} />
+          ) : null}
+          {activeTab === "multi" ? (
+            <ResultsTable rows={results.strategy4_hits || []} columns={strategy4Columns} />
+          ) : null}
+          {activeTab === "evaluation" ? (
+            <ResultsTable rows={results.strategy_evaluation || []} columns={evaluationColumns} />
+          ) : null}
 
           {activeTab === "viz" ? (
             <div className="viz-grid">
@@ -220,6 +303,24 @@ function ResultsDashboard({ results, pipelineStatus }) {
                 <div className="viz-card">
                   <h4>Chemical Space PCA</h4>
                   <img src={`${API_BASE}${results.pca_plot_download}`} alt="Chemical space PCA" />
+                </div>
+              ) : null}
+              {results.strategy_score_plot_download ? (
+                <div className="viz-card">
+                  <h4>Docking Score Comparison Across Strategies</h4>
+                  <img src={`${API_BASE}${results.strategy_score_plot_download}`} alt="Strategy docking score comparison" />
+                </div>
+              ) : null}
+              {results.strategy_diversity_plot_download ? (
+                <div className="viz-card">
+                  <h4>Diversity Comparison Across Strategies</h4>
+                  <img src={`${API_BASE}${results.strategy_diversity_plot_download}`} alt="Strategy diversity comparison" />
+                </div>
+              ) : null}
+              {results.strategy_pca_plot_download ? (
+                <div className="viz-card">
+                  <h4>PCA Chemical Space for Selected Hits</h4>
+                  <img src={`${API_BASE}${results.strategy_pca_plot_download}`} alt="Strategy chemical space PCA" />
                 </div>
               ) : null}
             </div>

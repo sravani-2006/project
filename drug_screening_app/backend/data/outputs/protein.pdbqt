@@ -18139,8 +18139,8 @@ REMARK                         _______ _______ _______ _____ _____    ______ ___
 ROOT
 ATOM      1  N   ASP A 831      28.952   5.339  56.003  0.00  0.00    +0.000 NA
 ATOM      2  H   ASP A 831      29.972   5.339  56.003  0.00  0.00    +0.000 HD
-ATOM      3  H   ASP A 831      28.612   4.419  56.282  0.00  0.00    +0.000 HD
-ATOM      4  H   ASP A 831      28.612   5.558  55.067  0.00  0.00    +0.000 HD
+ATOM      3  H   ASP A 831      28.612   4.902  56.860  0.00  0.00    +0.000 HD
+ATOM      4  H   ASP A 831      28.612   4.815  55.196  0.00  0.00    +0.000 HD
 ENDROOT
 TORSDOF 0
 REMARK  Name = c:\Users\SRAVANI\project\drug_screening_app\backend\data\outputs\protein_cleaned.pdb
@@ -24259,7 +24259,7 @@ REMARK                         _______ _______ _______ _____ _____    ______ ___
 ROOT
 ATOM      1  O   ASP A 831      30.895   7.948  55.395  0.00  0.00    +0.000 OA
 ATOM      2  H   ASP A 831      31.865   7.948  55.395  0.00  0.00    +0.000 HD
-ATOM      3  H   ASP A 831      30.572   8.798  55.057  0.00  0.00    +0.000 HD
+ATOM      3  H   ASP A 831      30.572   7.769  56.292  0.00  0.00    +0.000 HD
 ENDROOT
 TORSDOF 0
 REMARK  Name = c:\Users\SRAVANI\project\drug_screening_app\backend\data\outputs\protein_cleaned.pdb
